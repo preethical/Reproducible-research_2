@@ -1,0 +1,146 @@
+---
+title: "Severe Weather Events and their effects"
+author: "preethi"
+date: "10/26/2019"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Synopsis
+
+In this report we look at data from the NOAA storm database and answer two questions
+
+1) Across the United States, which types of events (as indicated by the EVTYPE variable) are most harmful with respect to population health?
+2) Across the United States, which types of events have the greatest economic consequences?
+
+## Brief description of the database
+
+1) The events in the database start in the year 1950 and end in November 2019. In the earlier years of the database there are generally fewer events recorded, most likely due to a lack of good records. More recent years should be considered more complete.
+
+2) The data is obtained from the National Weather Service and is publishehd by the National Oceanic and Atmospheric Administration (NOAA) in an attempt to record the occurence of weeather phenomena of sufficient intensity to cause  loss of life, injuries, significant property damage, and/or disruption to commerce
+
+## Loading and processing the raw data
+
+The data for this report is a part of the [Storm Events Database] (https://www.ncdc.noaa.gov/stormevents/)
+
+The file for our purposes is a comma-seperated-value file compressed with bzip2. 
+We will be using the data gathered from 1950 to Nov 2011 for our analysis. 
+
+```{r libraries, results='hide'}
+library(dplyr)
+library(ggplot2)
+```
+```{r readdata,}
+if(!file.exists("StormData.csv.bz2")){
+  download.file("https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2",
+                "StormData.csv.bz2")
+}
+
+Stormdata <- read.csv("StormData.csv.bz2",header = TRUE)
+
+```
+
+We can now look at the dataset
+
+```{r,summary, }
+
+dim(Stormdata)
+
+str(Stormdata)
+```
+
+We can now subset the table with the parameters that we would like to look at. 
+EVTYPE,F,MAG,FATALITIES,INJURIES,PRODMG,PRODMGEXP,CROPDMG and CROPDMGEXP
+
+```{r,subset,}
+
+Stormdata_subset <- Stormdata[,c("EVTYPE","F","MAG","FATALITIES","INJURIES",
+                                 "PROPDMG","PROPDMGEXP","CROPDMG", "CROPDMGEXP")]
+
+```
+As mentioned in [National Weather Service Storm Data Documentation] (https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf)
+the value K corresponds to thousand, M for a million and B for a billion and these valid qualifiers are found in PROPDMGEXP and CROPDMGEXP. 
+To make it less confusing and for initial analysis, we have created a new column total damage with the crop and property damage added and listed together. This was done by creating a function total damage which takes as its arguments PROPDMG,PROPDMGEXP, CROPDMG and CROPDMGEXP.
+
+```{r,total_damage,}
+total_damage <- function(prop_dmg,prop_exp,crop_dmg,crop_exp){
+ propdam <- 0
+ cropdam <- 0
+ 
+ if (prop_dmg > 0){
+   if (tolower(prop_exp) == "h")
+       propdam <- prop_dmg * 0
+   if (tolower(prop_exp) == "k")
+       propdam <- prop_dmg * 1000
+   if  (tolower(prop_exp) == "m")
+       propdam <- prop_dmg * 1000000
+   if (tolower(prop_exp) == "b")
+       propdam <- prop_dmg * 1000000000
+  }
+  if (crop_dmg > 0){
+   if (tolower(crop_exp) == "h")
+       propdam <- crop_dmg * 0
+   if (tolower(crop_exp) == "k")
+       propdam <- crop_dmg * 1000
+   if  (tolower(crop_exp) == "m")
+       propdam <- crop_dmg * 1000000
+   if (tolower(crop_exp) == "b")
+       propdam <- crop_dmg * 1000000000
+  }
+  return(propdam+cropdam)
+}
+Stormdata_subset$Totaldam <- mapply(total_damage,Stormdata_subset$PROPDMG,Stormdata_subset$PROPDMGEXP,
+                                    Stormdata_subset$CROPDMG,Stormdata_subset$CROPDMGEXP)
+
+```
+
+## Results
+
+### 1) Across the United States, which types of events (as indicated by the EVTYPE variable) are most harmful with respect to population health?
+
+To do this, we first subset the data based on weather pattern and then calculate the sum of injuries/fatalities for the respective patterns. 
+This is the put forth in the form of a table and figure for the 10 most harmful weather patterns (since there is too many to show them all).
+
+```{r,result1}
+injuries <- Stormdata_subset %>% group_by(EVTYPE)%>%
+  summarise(injuries = sum(INJURIES,na.rm = TRUE)) %>% as.data.frame() %>% rename(Weather_pattern=EVTYPE,injury_count = injuries)
+top_ten_i <- head(subset(injuries[order(injuries$injury_count,decreasing = TRUE),]),10)
+top_ten_i
+
+fatalities <- Stormdata_subset %>% group_by(EVTYPE)%>%
+  summarise(fatalities = sum(FATALITIES,na.rm = TRUE)) %>% as.data.frame() %>% rename(Weather_pattern=EVTYPE,fatality_count = fatalities)
+top_ten_f <- head(subset(fatalities[order(fatalities$fatality_count,decreasing=TRUE),]),10)
+top_ten_f
+
+most_injuries <- ggplot(top_ten_i, aes(Weather_pattern,injury_count)) +geom_col(aes(fill=Weather_pattern))+xlab("Weather condition")+ylab("Injury count")+ggtitle("Ten most harmful weather conditions by injury count")+theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+most_fatalities<- ggplot(top_ten_f, aes(Weather_pattern,fatality_count)) +geom_col(aes(fill=Weather_pattern))+xlab("Weather condition")+ylab("Fatality count")+ggtitle("Ten most harmful weather conditions by fatality count")+theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+most_fatalities
+
+most_injuries
+```
+
+### 2) Across the United States, which types of events have the greatest economic consequences?
+
+Using the total damage data that we have already calculated and introduced as a seperate column. We now subset the data by weather pattern again and calulate the sum of economic damage for the top 10 weather patterns
+
+```{r,result2}
+Economic_damage <- Stormdata_subset %>% group_by(EVTYPE)%>%
+  summarise(Economic_dmg =sum(Totaldam,na.rm = TRUE)) %>% as.data.frame() %>% rename(Weather_pattern=EVTYPE)
+top_ten_E <- head(subset(Economic_damage[order(Economic_damage$Economic_dmg,decreasing = TRUE),]),10)
+top_ten_E
+
+most_Economics<- ggplot(top_ten_E, aes(Weather_pattern,Economic_dmg)) +geom_col(aes(fill=Weather_pattern))+xlab("Weather condition")+ylab("Cost of Damages")+ggtitle("Ten most harmful weather conditions with the most economic consequences")+theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+most_Economics
+
+```
+##Conclusions
+The report concludes three plots and tables with information about the top 10 most destructive weather patterns with most injuries, fatalities, and economic consequences. 
+
